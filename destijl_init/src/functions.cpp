@@ -1,6 +1,24 @@
 #include "../header/functions.h"
+#include <pthread.h>
 
 char mode_start;
+
+pthread_t threadVideoID;
+Camera rpiCam;
+void * threadVideo(void * arg) {
+    Image imgVideo;
+    Arene monArene;
+    Position positionRobots[20];
+    Jpg compress;
+
+    open_camera(&rpiCam);
+    while(1) {
+        get_image(&rpiCam, &imgVideo);
+        compress_image(&imgVideo,&compress);
+        send_message_to_monitor(HEADER_STM_IMAGE, &compress);
+    }
+}
+
 
 void write_in_queue(RT_QUEUE *, MessageToMon);
 
@@ -109,6 +127,62 @@ void f_receiveFromMon(void *arg) {
 #endif
 
             }
+        } else if (strcmp(msg.header, HEADER_MTS_CAMERA) == 0) {
+            if ((msg.data[0] == CAM_OPEN)) {
+                pthread_create(&threadVideoID, NULL, threadVideo, NULL);
+                MessageToMon msg_ack;
+                set_msgToMon_header(&msg_ack, HEADER_STM_ACK);
+                write_in_queue(&q_messageToMon, msg_ack);
+
+#ifdef _WITH_TRACE_
+                printf("%s: message open camera with %c\n", info.name, msg.data[0]);
+#endif
+            } else if ((msg.data[0] == CAM_CLOSE)) {
+                pthread_cancel(threadVideoID);
+                close_camera(&rpiCam);
+                MessageToMon msg_ack;
+                set_msgToMon_header(&msg_ack, HEADER_STM_ACK);
+                write_in_queue(&q_messageToMon, msg_ack);
+
+#ifdef _WITH_TRACE_
+                printf("%s: message close camera with %c\n", info.name, msg.data[0]);
+#endif
+            }/* else if ((msg.data[0] == CAM_ASK_ARENA)) {
+
+
+
+#ifdef _WITH_TRACE_
+                printf("%s: message ask arena camera with %c\n", info.name, msg.data[0]);
+#endif
+            } else if ((msg.data[0] == CAM_ARENA_CONFIRM)) {
+
+
+
+#ifdef _WITH_TRACE_
+                printf("%s: message arena confirm camera with %c\n", info.name, msg.data[0]);
+#endif
+            } else if ((msg.data[0] == CAM_ARENA_INFIRM)) {
+
+
+
+#ifdef _WITH_TRACE_
+                printf("%s: message arena infirm camera with %c\n", info.name, msg.data[0]);
+#endif
+            } else if ((msg.data[0] == CAM_COMPUTE_POSITION)) {
+
+
+
+#ifdef _WITH_TRACE_
+                printf("%s: message compute position camera with %c\n", info.name, msg.data[0]);
+#endif
+            } else if ((msg.data[0] == CAM_STOP_COMPUTE_POSITION)) {
+
+
+
+#ifdef _WITH_TRACE_
+                printf("%s: message stop compute position camera with %c\n", info.name, msg.data[0]);
+#endif
+            }*/
         }
     } while (err > 0);
 

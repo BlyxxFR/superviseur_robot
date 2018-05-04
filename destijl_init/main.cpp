@@ -17,6 +17,7 @@
 #include <alchemy/queue.h>
 
 #include "./header/functions.h"
+#include "./header/battery.h"
 
 // Déclaration des taches
 RT_TASK th_server;
