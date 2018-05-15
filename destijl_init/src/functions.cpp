@@ -6,35 +6,39 @@ char mode_start;
 pthread_t threadVideoID;
 pthread_t threadPostionID;
 
-bool is_camera_open = false;
-
 Camera rpiCam;
 Image imgVideo;
 Arene monArene;
 Position positionRobots[20];
 Jpg compress;
 
-void * threadVideo(void * arg) {
-    open_camera(&rpiCam);
-    is_camera_open = true;
-    while(1) {
-        get_image(&rpiCam, &imgVideo);
-        compress_image(&imgVideo,&compress);
-        send_message_to_monitor(HEADER_STM_IMAGE, &compress);
+static void threadVideoCleanUp(void * arg) {
+    if (pthread_kill(threadPostionID, 0) == 0) {
+        pthread_cancel(threadPostionID);
     }
+    close_camera(&rpiCam);
 }
 
-void * threadComputePosition(void * arg) {
-    while(1) {
-        if(is_camera_open) {
-            if (detect_arena(&imgVideo, &monArene) == 0) {
-                detect_position(&imgVideo, positionRobots, &monArene);
-            } else
-                detect_position(&imgVideo, positionRobots);
+static void *threadVideo(void *arg) {
+    pthread_cleanup_push(threadVideoCleanUp, NULL);
+    open_camera(&rpiCam);
+    while (1) {
+        get_image(&rpiCam, &imgVideo);
+        compress_image(&imgVideo, &compress);
+        send_message_to_monitor(HEADER_STM_IMAGE, &compress);
+    }
+    pthread_cleanup_pop(NULL);
+}
 
-            draw_position(&imgVideo, &imgVideo, &positionRobots[0]);
-            send_message_to_monitor(HEADER_STM_POS, &positionRobots);
+static void *threadComputePosition(void *arg) {
+    while (1) {
+        if (detect_arena(&imgVideo, &monArene) == 0) {
+            detect_position(&imgVideo, positionRobots, &monArene);
+        } else {
+            detect_position(&imgVideo, positionRobots);
         }
+        draw_position(&imgVideo, &imgVideo, &positionRobots[0]);
+        send_message_to_monitor(HEADER_STM_POS, &positionRobots);
     }
 }
 
@@ -68,7 +72,7 @@ void f_server(void *arg) {
     }
 }
 
-void f_sendToMon(void * arg) {
+void f_sendToMon(void *arg) {
     int err;
     MessageToMon msg;
 
@@ -87,7 +91,7 @@ void f_sendToMon(void * arg) {
 #ifdef _WITH_TRACE_
         printf("%s : waiting for a message in queue\n", info.name);
 #endif
-        if (rt_queue_read(&q_messageToMon, &msg, sizeof (MessageToRobot), TM_INFINITE) >= 0) {
+        if (rt_queue_read(&q_messageToMon, &msg, sizeof(MessageToRobot), TM_INFINITE) >= 0) {
 #ifdef _WITH_TRACE_
             printf("%s : message {%s,%s} in queue\n", info.name, msg.header, msg.data);
 #endif
@@ -134,14 +138,14 @@ void f_receiveFromMon(void *arg) {
             if (msg.data[0] == DMB_START_WITHOUT_WD) { // Start robot
 #ifdef _WITH_TRACE_
                 printf("%s: message start robot\n", info.name);
-#endif 
+#endif
                 rt_sem_v(&sem_startRobot);
 
             } else if ((msg.data[0] == DMB_GO_BACK)
-                    || (msg.data[0] == DMB_GO_FORWARD)
-                    || (msg.data[0] == DMB_GO_LEFT)
-                    || (msg.data[0] == DMB_GO_RIGHT)
-                    || (msg.data[0] == DMB_STOP_MOVE)) {
+                       || (msg.data[0] == DMB_GO_FORWARD)
+                       || (msg.data[0] == DMB_GO_LEFT)
+                       || (msg.data[0] == DMB_GO_RIGHT)
+                       || (msg.data[0] == DMB_STOP_MOVE)) {
 
                 rt_mutex_acquire(&mutex_move, TM_INFINITE);
                 move = msg.data[0];
@@ -160,9 +164,7 @@ void f_receiveFromMon(void *arg) {
                 printf("%s: message open camera with %c\n", info.name, msg.data[0]);
 #endif
             } else if ((msg.data[0] == CAM_CLOSE)) {
-                is_camera_open = false;
                 pthread_cancel(threadVideoID);
-                close_camera(&rpiCam);
                 send_ack();
 
 #ifdef _WITH_TRACE_
@@ -206,7 +208,7 @@ void f_receiveFromMon(void *arg) {
 
 }
 
-void f_openComRobot(void * arg) {
+void f_openComRobot(void *arg) {
     int err;
 
     /* INIT */
@@ -239,7 +241,7 @@ void f_openComRobot(void * arg) {
     }
 }
 
-void f_startRobot(void * arg) {
+void f_startRobot(void *arg) {
     int err;
 
     /* INIT */
@@ -303,7 +305,7 @@ void f_move(void *arg) {
             rt_mutex_release(&mutex_move);
 #ifdef _WITH_TRACE_
             printf("%s: the movement %c was sent\n", info.name, move);
-#endif            
+#endif
         }
         rt_mutex_release(&mutex_robotStarted);
     }
@@ -311,7 +313,7 @@ void f_move(void *arg) {
 
 void write_in_queue(RT_QUEUE *queue, MessageToMon msg) {
     void *buff;
-    buff = rt_queue_alloc(&q_messageToMon, sizeof (MessageToMon));
-    memcpy(buff, &msg, sizeof (MessageToMon));
-    rt_queue_send(&q_messageToMon, buff, sizeof (MessageToMon), Q_NORMAL);
+    buff = rt_queue_alloc(&q_messageToMon, sizeof(MessageToMon));
+    memcpy(buff, &msg, sizeof(MessageToMon));
+    rt_queue_send(&q_messageToMon, buff, sizeof(MessageToMon), Q_NORMAL);
 }
