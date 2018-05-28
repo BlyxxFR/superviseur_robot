@@ -1,46 +1,10 @@
 #include "../header/functions.h"
+#include "../header/camera.h"
 #include <pthread.h>
 
 char mode_start;
 
-pthread_t threadVideoID;
-pthread_t threadPostionID;
-
-Camera rpiCam;
-Image imgVideo;
-Arene monArene;
-Position positionRobots[20];
-Jpg compress;
-
-static void threadVideoCleanUp(void * arg) {
-    if (pthread_kill(threadPostionID, 0) == 0) {
-        pthread_cancel(threadPostionID);
-    }
-    close_camera(&rpiCam);
-}
-
-static void *threadVideo(void *arg) {
-    pthread_cleanup_push(threadVideoCleanUp, NULL);
-    open_camera(&rpiCam);
-    while (1) {
-        get_image(&rpiCam, &imgVideo);
-        compress_image(&imgVideo, &compress);
-        send_message_to_monitor(HEADER_STM_IMAGE, &compress);
-    }
-    pthread_cleanup_pop(NULL);
-}
-
-static void *threadComputePosition(void *arg) {
-    while (1) {
-        if (detect_arena(&imgVideo, &monArene) == 0) {
-            detect_position(&imgVideo, positionRobots, &monArene);
-        } else {
-            detect_position(&imgVideo, positionRobots);
-        }
-        draw_position(&imgVideo, &imgVideo, &positionRobots[0]);
-        send_message_to_monitor(HEADER_STM_POS, &positionRobots);
-    }
-}
+TheCamera camera;
 
 void write_in_queue(RT_QUEUE *, MessageToMon);
 
@@ -157,47 +121,46 @@ void f_receiveFromMon(void *arg) {
             }
         } else if (strcmp(msg.header, HEADER_MTS_CAMERA) == 0) {
             if ((msg.data[0] == CAM_OPEN)) {
-                pthread_create(&threadVideoID, NULL, threadVideo, NULL);
+                camera.openCamera();
                 send_ack();
 
 #ifdef _WITH_TRACE_
                 printf("%s: message open camera with %c\n", info.name, msg.data[0]);
 #endif
             } else if ((msg.data[0] == CAM_CLOSE)) {
-                pthread_cancel(threadVideoID);
+                camera.closeCamera();
                 send_ack();
 
 #ifdef _WITH_TRACE_
                 printf("%s: message close camera with %c\n", info.name, msg.data[0]);
 #endif
             } else if ((msg.data[0] == CAM_ASK_ARENA)) {
-                detect_arena(&imgVideo, &monArene);
+                camera.detectArena();
                 send_ack();
 
 #ifdef _WITH_TRACE_
                 printf("%s: message ask arena camera with %c\n", info.name, msg.data[0]);
 #endif
             } else if ((msg.data[0] == CAM_ARENA_CONFIRM)) {
-                draw_arena(&imgVideo, &imgVideo, &monArene);
+                camera.arenaConfirm();
                 send_ack();
 #ifdef _WITH_TRACE_
                 printf("%s: message arena confirm camera with %c\n", info.name, msg.data[0]);
 #endif
             } else if ((msg.data[0] == CAM_ARENA_INFIRM)) {
-                Arene *p = &monArene;
-                p = NULL;
+                camera.arenaInfirm();
                 send_ack();
 #ifdef _WITH_TRACE_
                 printf("%s: message arena infirm camera with %c\n", info.name, msg.data[0]);
 #endif
             } else if ((msg.data[0] == CAM_COMPUTE_POSITION)) {
-                pthread_create(&threadPostionID, NULL, threadComputePosition, NULL);
+                camera.startComputingPosition();
                 send_ack();
 #ifdef _WITH_TRACE_
                 printf("%s: message compute position camera with %c\n", info.name, msg.data[0]);
 #endif
             } else if ((msg.data[0] == CAM_STOP_COMPUTE_POSITION)) {
-                pthread_cancel(threadPostionID);
+                camera.stopComputingPosition();
                 send_ack();
 #ifdef _WITH_TRACE_
                 printf("%s: message stop compute position camera with %c\n", info.name, msg.data[0]);

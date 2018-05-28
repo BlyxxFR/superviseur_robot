@@ -5,6 +5,8 @@
 #ifndef SUPERVISEUR_ROBOT_BATTERY_H
 #define SUPERVISEUR_ROBOT_BATTERY_H
 
+#define BATTERY_LEVEL_UNKNOWN -1
+
 #ifdef __cplusplus
 extern "C" {
 #endif
