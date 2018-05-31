@@ -3,6 +3,7 @@
 //
 
 #include "../header/functions.h"
+#include "../header/periodicThreads.h"
 #include "../header/camera.h"
 #include <pthread.h>
 #include <unistd.h>
@@ -38,11 +39,12 @@ void TheCamera::openCamera() {
      */
 
 void TheCamera::closeCamera() {
-    if (!this->_threadVideoID || pthread_kill(this->_threadVideoID, 0) == 0) {
-        if (!this->_threadPositionID || pthread_kill(this->_threadPositionID, 0) == 0) {
+    if (this->_threadVideoID && pthread_kill(this->_threadVideoID, 0) == 0) {
+        if (this->_threadPositionID && pthread_kill(this->_threadPositionID, 0) == 0) {
             pthread_cancel(this->_threadPositionID);
         }
         close_camera(&this->_rpiCam);
+        memset(&this->_threadVideoID, '\0', sizeof(pthread_t));
     }
 }
 
@@ -93,8 +95,9 @@ void TheCamera::startComputingPosition() {
      */
 
 void TheCamera::stopComputingPosition() {
-    if (pthread_kill(this->_threadPositionID, 0) == 0) {
+    if (this->_threadPositionID && pthread_kill(this->_threadPositionID, 0) == 0) {
         pthread_cancel(this->_threadPositionID);
+        memset(&this->_threadPositionID, '\0', sizeof(pthread_t));
     }
 }
 
@@ -104,13 +107,17 @@ void TheCamera::stopComputingPosition() {
      */
 
 void *TheCamera::_threadVideo(void *arg) {
+    PeriodicThreads periodicThreads;
+    struct periodic_info info;
+    periodicThreads.make_periodic(100000, &info);
+
     TheCamera * This = (TheCamera *)arg;
     open_camera(&This->_rpiCam);
     while (1) {
         get_image(&This->_rpiCam, &This->_imgVideo);
         compress_image(&This->_imgVideo, &This->_compress);
         send_message_to_monitor(HEADER_STM_IMAGE, &This->_compress);
-        usleep(100);
+        periodicThreads.wait_period(&info);
     }
     return NULL;
 }
@@ -121,6 +128,10 @@ void *TheCamera::_threadVideo(void *arg) {
      */
 
 void *TheCamera::_threadComputePosition(void *arg) {
+    PeriodicThreads periodicThreads;
+    struct periodic_info info;
+    periodicThreads.make_periodic(100000, &info);
+
     TheCamera * This = (TheCamera *)arg;
     if (!This->_threadVideoID || pthread_kill(This->_threadVideoID, 0) == 0) {
         while (1) {
@@ -131,6 +142,7 @@ void *TheCamera::_threadComputePosition(void *arg) {
             }
             draw_position(&This->_imgVideo, &This->_imgVideo, &This->_positionRobots[0]);
             send_message_to_monitor(HEADER_STM_POS, &This->_positionRobots);
+            periodicThreads.wait_period(&info);
         }
     }
     return NULL;
