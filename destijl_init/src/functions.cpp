@@ -1,12 +1,48 @@
 #include "../header/functions.h"
 #include "../header/camera.h"
+#include "../header/periodicThreads.h"
+
+#include "../../src/robot.h"
+
 #include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
 
 char mode_start;
 
 TheCamera camera;
 
+pthread_t threadIdCheckBattery;
+
 void write_in_queue(RT_QUEUE *, MessageToMon);
+
+void *threadCheckLevel(void *arg) {
+    PeriodicThreads periodicThreads;
+    struct periodic_info info;
+    periodicThreads.make_periodic(500000, &info);
+
+    while(1) {
+        // Récupération du niveau de la battery
+        int level = send_command_to_robot(DMB_GET_VBAT, "");
+
+        printf("\n\n\n\n BATTERY LEVEL: %d\n\n\n\n\n", level);
+
+        int length = snprintf( NULL, 0, "%d", level );
+        char* str = (char*)malloc( length + 1 );
+        snprintf( str, length + 1, "%d", level );
+
+        // Envoi au moniteur
+        MessageToMon msg_battery;
+        set_msgToMon_header(&msg_battery, HEADER_STM_BAT);
+        set_msgToMon_data(&msg_battery, str);
+        write_in_queue(&q_messageToMon, msg_battery);
+
+        free(str);
+
+        periodicThreads.wait_period(&info);
+    }
+    return NULL;
+}
 
 void send_ack() {
     MessageToMon msg_ack;
@@ -59,7 +95,6 @@ void f_sendToMon(void *arg) {
 #ifdef _WITH_TRACE_
             printf("%s : message {%s,%s} in queue\n", info.name, msg.header, msg.data);
 #endif
-
             send_message_to_monitor(msg.header, msg.data);
             free_msgToMon_data(&msg);
             rt_queue_free(&q_messageToMon, &msg);
@@ -97,6 +132,22 @@ void f_receiveFromMon(void *arg) {
                 printf("%s: message open Xbee communication\n", info.name);
 #endif
                 rt_sem_v(&sem_openComRobot);
+
+                // Thread battery
+                if(!threadIdCheckBattery || pthread_kill(threadIdCheckBattery, 0) != 0) {
+                    pthread_create(&threadIdCheckBattery, NULL, threadCheckLevel, NULL);
+                }
+            }
+            else if (msg.data[0] == CLOSE_COM_DMB) { // Close communication supervisor-robot
+#ifdef _WITH_TRACE_
+                printf("%s: message close Xbee communication\n", info.name);
+#endif
+                // Thread battery
+                if (threadIdCheckBattery && pthread_kill(threadIdCheckBattery, 0) == 0) {
+                    pthread_cancel(threadIdCheckBattery);
+                    memset(&threadIdCheckBattery, '\0', sizeof(pthread_t));
+                }
+                send_ack();
             }
         } else if (strcmp(msg.header, HEADER_MTS_DMB_ORDER) == 0) {
             if (msg.data[0] == DMB_START_WITHOUT_WD) { // Start robot
@@ -206,6 +257,8 @@ void f_openComRobot(void *arg) {
 
 void f_startRobot(void *arg) {
     int err;
+
+    pthread_create(&threadIdCheckBattery, NULL, threadCheckLevel, NULL);
 
     /* INIT */
     RT_TASK_INFO info;
